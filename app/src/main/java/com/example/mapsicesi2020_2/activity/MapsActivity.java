@@ -12,15 +12,20 @@ import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
 import android.os.Bundle;
+import android.provider.SyncStateContract;
 import android.view.Gravity;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import com.example.mapsicesi2020_2.R;
+import com.example.mapsicesi2020_2.communication.HTTPSWebUtilDomi;
+import com.example.mapsicesi2020_2.communication.HolesWorker;
 import com.example.mapsicesi2020_2.communication.LocationWorker;
 import com.example.mapsicesi2020_2.communication.TrackUsersWorker;
+import com.example.mapsicesi2020_2.model.Hole;
 import com.example.mapsicesi2020_2.model.Position;
+import com.google.android.gms.common.internal.Constants;
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
@@ -30,11 +35,13 @@ import com.google.android.gms.maps.model.BitmapDescriptorFactory;
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.MarkerOptions;
+import com.google.gson.Gson;
 import com.google.maps.android.SphericalUtil;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 
 public class MapsActivity extends FragmentActivity implements OnMapReadyCallback, LocationListener, GoogleMap.OnMapClickListener, GoogleMap.OnMapLongClickListener, GoogleMap.OnMarkerClickListener {
 
@@ -49,7 +56,9 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     private LocationWorker locationWorker;
     private Position currentPosition;
     private TrackUsersWorker trackUsersWorker;
+    private HolesWorker holesWorker;
     private Marker hole;
+    private Hole holeClass;
     private ArrayList<Marker> holes;
 
 
@@ -60,6 +69,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         addHoleBtn = findViewById(R.id.addHoleBtn);
         user = getIntent().getExtras().getString("user");
         markers = new ArrayList<>();
+        holes = new ArrayList<>();
         txtData = findViewById(R.id.txtData);
         holeDistancetxt = findViewById(R.id.holeDistancetxt);
         holeDistancetxt.setText("Hole a " + computeDistances() + " meters");
@@ -82,7 +92,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         //mMap.setOnMapClickListener(this);
         //mMap.setOnMapLongClickListener(this);
         //mMap.setOnMarkerClickListener(this);
-
+        holesWorker = new HolesWorker(this);
         addHoleBtn.setOnClickListener(
                 (v) ->{
                     AlertDialog.Builder confirmMessage = new AlertDialog.Builder(this);
@@ -97,10 +107,12 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                         @Override
                         public void onClick(DialogInterface dialogInterface, int i) {
                             dialogInterface.cancel();
+                            holeClass = new Hole(UUID.randomUUID().toString());
+                            holesWorker.start();
                             LatLng myPos = new LatLng(currentPosition.getLng(), currentPosition.getLng());
                             hole = mMap.addMarker(new MarkerOptions().position(myPos).title("Hole"));
-                            hole.setIcon(BitmapDescriptorFactory.defaultMarker(90));
-                            hole.setIcon(BitmapDescriptorFactory.fromResource(R.drawable.holegraymarker));
+                            hole.setIcon(BitmapDescriptorFactory.fromResource(R.drawable.holeredmarker));
+                            holes.add(hole);
                         }
                     });
                     AlertDialog tittle = confirmMessage.create();
@@ -123,6 +135,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     protected void onDestroy() {
         locationWorker.finish();
         trackUsersWorker.finish();
+        holesWorker.finish();
         super.onDestroy();
     }
 
@@ -140,6 +153,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     }
 
     public void updateMyLocation(Location location){
+
         LatLng myPos = new LatLng(location.getLatitude(), location.getLongitude());
         /*
         if (me == null) {
@@ -175,9 +189,6 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
 
     @Override
     public void onMapLongClick(LatLng latLng) {
-        //Marker m = mMap.addMarker(new MarkerOptions().position(latLng).title("Marcador"));
-        //snipet subtittle
-        //markers.add(m);
     }
 
     @Override
@@ -230,6 +241,10 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         return user;
     }
 
+    public Hole getHoleClass() {
+        return holeClass;
+    }
+
     public void updateMarkers(ArrayList<Position> positions){
             runOnUiThread(
                     ()->{
@@ -238,13 +253,22 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                             Marker m = markers.get(i);
                             m.remove();
                         }
+                        markers.clear();
+
 
                         for (int i = 0; i < positions.size(); i++){
                             Position pos = positions.get(i);
                             LatLng latLng = new LatLng(pos.getLat(), pos.getLng());
                             Marker m = mMap.addMarker(new MarkerOptions().position(latLng));
+                            //m.setIcon(BitmapDescriptorFactory.fromResource(90));
                             markers.add(m);
                         }
+                        /*
+                        for (int i = 0; i < holes.size(); i++){
+                            //holes.add(m);
+                        }
+                        */
+
                     }
             );
     }
