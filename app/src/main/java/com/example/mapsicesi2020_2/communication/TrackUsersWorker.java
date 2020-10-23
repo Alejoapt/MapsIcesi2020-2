@@ -3,12 +3,14 @@ package com.example.mapsicesi2020_2.communication;
 import android.util.Log;
 
 import com.example.mapsicesi2020_2.activity.MapsActivity;
+import com.example.mapsicesi2020_2.model.Hole;
 import com.example.mapsicesi2020_2.model.Position;
 import com.example.mapsicesi2020_2.model.PositionContainer;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 
 import java.lang.reflect.Type;
+import java.security.Key;
 import java.util.ArrayList;
 import java.util.HashMap;
 
@@ -32,7 +34,7 @@ public class TrackUsersWorker extends Thread{
             Log.e(">>>", json);
             Type type = new TypeToken< HashMap<String, PositionContainer>>(){}.getType();
             HashMap<String, PositionContainer> users = gson.fromJson(json, type);
-
+            HashMap<String, PositionContainer> holes = gson.fromJson(json,type);
             ArrayList<Position> positions = new ArrayList<>();
             users.forEach((key, value)->{
                 Log.e(">>>",key);
@@ -41,6 +43,8 @@ public class TrackUsersWorker extends Thread{
                 double lng = positionContainer.getLocation().getLng();
                 positions.add(new Position(lat,lng));
             });
+
+
             ref.updateMarkers(positions);
         }
     }
