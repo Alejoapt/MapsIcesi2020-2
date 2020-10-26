@@ -12,25 +12,23 @@ import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
 import android.os.Bundle;
-import android.provider.SyncStateContract;
 import android.view.Gravity;
+import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import com.example.mapsicesi2020_2.R;
-import com.example.mapsicesi2020_2.communication.HTTPSWebUtilDomi;
-import com.example.mapsicesi2020_2.communication.HolesWorker;
+import com.example.mapsicesi2020_2.communication.HoleWorker;
 import com.example.mapsicesi2020_2.communication.LocationWorker;
+import com.example.mapsicesi2020_2.communication.TrackHolesWorker;
 import com.example.mapsicesi2020_2.communication.TrackUsersWorker;
 import com.example.mapsicesi2020_2.model.Hole;
 import com.example.mapsicesi2020_2.model.Position;
-import com.google.android.gms.common.internal.Constants;
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.SupportMapFragment;
-import com.google.android.gms.maps.model.BitmapDescriptor;
 import com.google.android.gms.maps.model.BitmapDescriptorFactory;
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.Marker;
@@ -42,25 +40,36 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class MapsActivity extends FragmentActivity implements OnMapReadyCallback, LocationListener, GoogleMap.OnMapClickListener, GoogleMap.OnMapLongClickListener, GoogleMap.OnMarkerClickListener {
 
     private GoogleMap mMap;
     private String user;
     private LocationManager manager;
-    //private Marker me;
+    private Marker userMarker;
     private ArrayList<Marker> markers;
+    private ArrayList<String> userNames;
     private Button addHoleBtn;
     private TextView holeDistancetxt;
-    private TextView txtData;
     private LocationWorker locationWorker;
     private Position currentPosition;
     private TrackUsersWorker trackUsersWorker;
-    private HolesWorker holesWorker;
+    private TrackHolesWorker trackHolesWorker;
+    private HoleWorker holesWorker;
     private Marker hole;
     private Hole holeClass;
     private ArrayList<Marker> holes;
+    private Button confirmBtn;
+    private double distanceToHole;
 
+    public ArrayList<String> getUserNames() {
+        return userNames;
+    }
+
+    public void setUserNames(ArrayList<String> userNames) {
+        this.userNames = userNames;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -70,15 +79,16 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         user = getIntent().getExtras().getString("user");
         markers = new ArrayList<>();
         holes = new ArrayList<>();
-        txtData = findViewById(R.id.txtData);
+        userNames = new ArrayList<>();
         holeDistancetxt = findViewById(R.id.holeDistancetxt);
+        computeDistances();
         holeDistancetxt.setText("Hole a " + computeDistances() + " meters");
         holeDistancetxt.setGravity(Gravity.CENTER);
         // Obtain the SupportMapFragment and get notified when the map is ready to be used.
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
                 .findFragmentById(R.id.map);
         mapFragment.getMapAsync(this);
-
+        confirmBtn = findViewById(R.id.confirmBtn);
         manager = (LocationManager) getSystemService(LOCATION_SERVICE);
     }
 
@@ -87,48 +97,56 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     public void onMapReady(GoogleMap googleMap) {
         mMap = googleMap;
         mMap.setMyLocationEnabled(true);
-        manager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 1000, 2, this);
+        manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 2, this);
         setInitialPos();
         //mMap.setOnMapClickListener(this);
         //mMap.setOnMapLongClickListener(this);
-        //mMap.setOnMarkerClickListener(this);
-        holesWorker = new HolesWorker(this);
+        mMap.setOnMarkerClickListener(this);
+        holesWorker = new HoleWorker(this);
         addHoleBtn.setOnClickListener(
                 (v) ->{
-                    AlertDialog.Builder confirmMessage = new AlertDialog.Builder(this);
-                    //txtData.setText("\"Coordinates:\" + \"\\n\" + me.getPosition().latitude + \", \" + me.getPosition().longitude + \"\\n\" + \"Address:\" + \"\\n\"");
-                   // txtData.showContextMenu();
-                    //String address = locationAddress.getAddressFromLocation(me.getPosition().latitude, me.getPosition().longitude, getApplicationContext(), new Geocoder());
 
+                    AlertDialog.Builder confirmMessage = new AlertDialog.Builder(this);
                     confirmMessage.setMessage("Coordinates:" + "\n" + currentPosition.getLat() + ", " + currentPosition.getLng() + "\n" + "Address:" + "\n"  + getCompleteAddress(currentPosition.getLat(), currentPosition.getLng()
                     ))
-                    .setCancelable(true)
-                    .setPositiveButton("Ok", new DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(DialogInterface dialogInterface, int i) {
-                            dialogInterface.cancel();
-                            holeClass = new Hole(UUID.randomUUID().toString());
-                            holesWorker.start();
-                            LatLng myPos = new LatLng(currentPosition.getLng(), currentPosition.getLng());
-                            hole = mMap.addMarker(new MarkerOptions().position(myPos).title("Hole"));
-                            hole.setIcon(BitmapDescriptorFactory.fromResource(R.drawable.holeredmarker));
-                            holes.add(hole);
-                        }
-                    });
+                            .setCancelable(true)
+                            .setPositiveButton("Ok", new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface dialogInterface, int i) {
+                                    dialogInterface.cancel();
+                                    holeClass = new Hole(UUID.randomUUID().toString());
+                                    holesWorker.execute();
+
+                                }
+                            });
                     AlertDialog tittle = confirmMessage.create();
                     tittle.setTitle("Add a hole");
                     tittle.show();
 
-                    LatLng latLng = new LatLng(currentPosition.getLat(),currentPosition.getLng());
-                    mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 10));
+                    //LatLng latLng = new LatLng(currentPosition.getLat(),currentPosition.getLng());
+                    //Map.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 100));
 
                 }
         );
+        confirmBtn.setOnClickListener(
+                (v)->{
+                    for (int i = 0; i < holes.size(); i++){
+                        holes.get(i).setTag(true);
+                    }
+                    Toast.makeText(this,"Hole confirmed", Toast.LENGTH_SHORT).show();
+                    confirmBtn.setVisibility(View.INVISIBLE);
+                }
+        );
+
         locationWorker = new LocationWorker(this);
-        locationWorker.start();
+        locationWorker.execute();
 
         trackUsersWorker = new TrackUsersWorker(this);
         trackUsersWorker.start();
+
+
+        trackHolesWorker = new TrackHolesWorker(this);
+        trackHolesWorker.start();
     }
 
     @Override
@@ -136,6 +154,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         locationWorker.finish();
         trackUsersWorker.finish();
         holesWorker.finish();
+        trackHolesWorker.finish();
         super.onDestroy();
     }
 
@@ -155,14 +174,8 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     public void updateMyLocation(Location location){
 
         LatLng myPos = new LatLng(location.getLatitude(), location.getLongitude());
-        /*
-        if (me == null) {
-            me = mMap.addMarker(new MarkerOptions().position(myPos).title("Yo"));
-        }else{
-            me.setPosition(myPos);
-        }
-         */
-        mMap.animateCamera(CameraUpdateFactory.newLatLng(myPos));
+
+        mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(myPos, 6));
         currentPosition = new Position(location.getLatitude(), location.getLongitude());
 
     }
@@ -193,23 +206,34 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
 
     @Override
     public boolean onMarkerClick(Marker marker) {
-        //Toast.makeText(this, marker.getPosition().latitude + ", " + marker.getPosition().longitude, Toast.LENGTH_LONG).show();
+
+        for(int i = 0; i < holes.size(); i++) {
+            if (marker.getTag().equals(false)) {
+                confirmBtn.setVisibility(View.VISIBLE);
+            }
+        }
         marker.showInfoWindow();
         return true;
     }
 
     public double computeDistances(){
-        double meters = 0;
-        if(holes != null) {
-            for (int i = 0; i < holes.size(); i++) {
-                Marker marker = holes.get(i);
-                LatLng holeLoc = marker.getPosition();
-                LatLng meLoc = new LatLng(currentPosition.getLat(), currentPosition.getLng());
+        distanceToHole = 1000000000;
+        runOnUiThread(
+                ()->{
+                    if(holes != null) {
+                        for (int i = 0; i < holes.size(); i++) {
+                            Marker marker = holes.get(i);
+                            LatLng holeLoc = marker.getPosition();
+                            LatLng meLoc = new LatLng(currentPosition.getLat(), currentPosition.getLng());
 
-                meters = SphericalUtil.computeDistanceBetween(holeLoc, meLoc);
-            }
-        }
-        return meters;
+                            distanceToHole = (Math.rint((Math.min((SphericalUtil.computeDistanceBetween(holeLoc, meLoc)), distanceToHole) * 10) / 10));
+
+                        }
+                    }
+
+                }
+        );
+        return distanceToHole;
     }
 
     public String getCompleteAddress(double latitude, double longitude){
@@ -233,7 +257,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         }
         return address;
     }
-    public Position getMyMarker(){
+    public Position getCurrentPosition(){
         return currentPosition;
     }
 
@@ -246,6 +270,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     }
 
     public void updateMarkers(ArrayList<Position> positions){
+            LatLng markerPos = new LatLng(currentPosition.getLat(), currentPosition.getLng());
             runOnUiThread(
                     ()->{
 
@@ -255,22 +280,61 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                         }
                         markers.clear();
 
+                            for (int i = 0; i < positions.size(); i++) {
+                                for (int j = 0; j < this.userNames.size(); j++) {
+                                    String id = this.userNames.get(i);
+                                    Position pos = positions.get(i);
+                                    LatLng latLng = new LatLng(pos.getLat(), pos.getLng());
+                                    userMarker = mMap.addMarker(new MarkerOptions().position(latLng));
+                                    userMarker.setTag(i);
+                                    if (userMarker.getTag().equals(1)) {
+                                        userMarker.setIcon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_CYAN));
 
-                        for (int i = 0; i < positions.size(); i++){
-                            Position pos = positions.get(i);
-                            LatLng latLng = new LatLng(pos.getLat(), pos.getLng());
-                            Marker m = mMap.addMarker(new MarkerOptions().position(latLng));
-                            //m.setIcon(BitmapDescriptorFactory.fromResource(90));
-                            markers.add(m);
-                        }
-                        /*
-                        for (int i = 0; i < holes.size(); i++){
-                            //holes.add(m);
-                        }
-                        */
+                                    } else {
+                                        userMarker.setIcon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN));
+                                        userMarker.setTitle(id);
+                                    }
+
+
+                                    markers.add(userMarker);
+                                }
+
+                            }
+
+
 
                     }
             );
     }
+
+    public void updateHoleMarkers(ArrayList<Position> positions) {
+
+        runOnUiThread(
+                ()->{
+
+                    for (int i = 0; i < holes.size(); i++){
+                        Marker m = holes.get(i);
+                        m.remove();
+                    }
+                    holes.clear();
+
+                    for (int i = 0; i < positions.size(); i++){
+                        Position pos = positions.get(i);
+                        LatLng latLng = new LatLng(pos.getLat(), pos.getLng());
+                        Marker m = mMap.addMarker(new MarkerOptions().position(latLng));
+                        m.setTag(false);
+                        if (m.getTag().equals(false)) {
+                            m.setIcon(BitmapDescriptorFactory.fromResource(R.drawable.holeredmarker));
+                        }else{
+                            m.setIcon(BitmapDescriptorFactory.fromResource(R.drawable.holegraymarker));
+                        }
+                        holes.add(m);
+                    }
+
+                }
+        );
+
+    }
+
 }
 
